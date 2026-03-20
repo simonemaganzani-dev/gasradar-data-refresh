@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 GasRadar - Data refresh script for GitHub Actions
-Fetches fuel price data from MINETUR Spain API and uploads to Base44 CDN
+Fetches fuel price data from MINETUR Spain API and saves to gasdata_output.json
 """
 
 import json
@@ -12,8 +12,6 @@ import sys
 from datetime import datetime, timezone, timedelta
 
 MINETUR_URL = "https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/"
-BASE44_APP_ID = "69bc75f3240b4a7a928e73ed"
-BASE44_UPLOAD_URL = f"https://base44.app/api/apps/{BASE44_APP_ID}/files/upload-public"
 
 PRICE_MAP = {
     "Precio Gasoleo A":       "gasoilA",
@@ -45,7 +43,7 @@ def fetch_minetur():
         MINETUR_URL,
         headers={
             "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
         }
     )
     with urllib.request.urlopen(req, timeout=60) as resp:
@@ -82,52 +80,11 @@ def normalize(stations_raw):
     print(f"✅ Normalized {len(stations)} stations")
     return stations
 
-def upload_to_base44(data, api_key):
-    print("📤 Uploading to Base44 CDN...")
-    json_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-
-    boundary = "----GasRadarBoundary7MA4YWxk"
-    CRLF = b"\r\n"
-    body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file"; filename="gasdata_normalized.json"\r\n'
-        f"Content-Type: application/json\r\n\r\n"
-    ).encode("utf-8") + json_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
-
-    req = urllib.request.Request(
-        BASE44_UPLOAD_URL,
-        data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Content-Length": str(len(body)),
-        },
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body_err = e.read().decode()
-        print(f"❌ Upload failed {e.code}: {body_err[:500]}")
-        raise
-
-    cdn_url = result.get("url") or result.get("file_url") or result.get("fileUrl")
-    print(f"✅ Uploaded! URL: {cdn_url}")
-    return cdn_url
-
 def main():
-    api_key = os.environ.get("BASE44_API_KEY")
-    if not api_key:
-        print("❌ BASE44_API_KEY not set", file=sys.stderr)
-        sys.exit(1)
-
     stations_raw = fetch_minetur()
     stations = normalize(stations_raw)
 
-    now = datetime.now(timezone.utc)
-    madrid_offset = timedelta(hours=1)
-    madrid_time = now + madrid_offset
+    madrid_time = datetime.now(timezone.utc) + timedelta(hours=1)
     updated_at = madrid_time.strftime("%d/%m/%Y %H:%M")
 
     output = {
@@ -136,9 +93,11 @@ def main():
         "stations": stations,
     }
 
-    cdn_url = upload_to_base44(output, api_key)
+    with open("gasdata_output.json", "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False, separators=(",", ":"))
+
     print(f"🎉 Done! {len(stations)} stations · Updated: {updated_at}")
-    print(f"CDN URL: {cdn_url}")
+    print(f"📁 Saved to gasdata_output.json")
 
 if __name__ == "__main__":
     main()

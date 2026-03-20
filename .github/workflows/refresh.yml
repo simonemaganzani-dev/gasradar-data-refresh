@@ -2,27 +2,47 @@ name: Refresh GasRadar Data
 
 on:
   schedule:
-    - cron: '0 6,18 * * *'   # Every 12h: 06:00 and 18:00 UTC (07:00/19:00 Madrid)
-  workflow_dispatch:           # Manual trigger from GitHub UI
+    - cron: '0 6,18 * * *'   # 7:00 and 19:00 Madrid time
+  workflow_dispatch:
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          path: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Fetch & upload gas data
+      - name: Fetch & generate gas data
+        run: |
+          cd main
+          python3 refresh_gas.py
         env:
-          BASE44_API_KEY: ${{ secrets.BASE44_API_KEY }}
-        run: python refresh_gas.py
+          GASRADAR_SECRET_TOKEN: ${{ secrets.GASRADAR_SECRET_TOKEN }}
 
-      - name: Log result
-        run: echo "✅ GasRadar data refreshed at $(date -u)"
+      - name: Publish to GitHub Pages
+        run: |
+          mkdir -p gh-pages
+          cp main/gasdata_output.json gh-pages/gasdata.json
+          cd gh-pages
+          git config user.name "GasRadar Bot"
+          git config user.email "bot@gasradar.app"
+          git add gasdata.json
+          git diff --staged --quiet || git commit -m "🔄 Update gas data $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push origin gh-pages
