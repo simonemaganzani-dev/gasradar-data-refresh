@@ -1,0 +1,28 @@
+name: Refresh GasRadar Data
+
+on:
+  schedule:
+    - cron: '0 6,18 * * *'   # Every 12h: 06:00 and 18:00 UTC (07:00/19:00 Madrid)
+  workflow_dispatch:           # Manual trigger from GitHub UI
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Fetch & upload gas data
+        env:
+          BASE44_API_KEY: ${{ secrets.BASE44_API_KEY }}
+        run: python refresh_gas.py
+
+      - name: Log result
+        run: echo "✅ GasRadar data refreshed at $(date -u)"
