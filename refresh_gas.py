@@ -9,22 +9,22 @@ import urllib.request
 import urllib.error
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 MINETUR_URL = "https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/"
 BASE44_APP_ID = "69bc75f3240b4a7a928e73ed"
 BASE44_UPLOAD_URL = f"https://base44.app/api/apps/{BASE44_APP_ID}/files/upload-public"
 
 PRICE_MAP = {
-    "PrecioGasoleoA": "gasoilA",
-    "PrecioGasolina95E5": "gasolina95",
-    "PrecioGasolina98E5": "gasolina98",
-    "PrecioGasoleo Premium": "gasoilPremium",
-    "PrecioGLP": "glp",
+    "Precio Gasoleo A":       "gasoilA",
+    "Precio Gasolina 95 E5":  "gasolina95",
+    "Precio Gasolina 98 E5":  "gasolina98",
+    "Precio Gasoleo Premium": "gasoilPremium",
+    "Precio Gases licuados del petróleo": "glp",
 }
 
 def parse_price(val):
-    if not val or val == "":
+    if not val or str(val).strip() == "":
         return None
     try:
         return round(float(str(val).replace(",", ".")), 4)
@@ -45,7 +45,7 @@ def fetch_minetur():
         MINETUR_URL,
         headers={
             "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
     )
     with urllib.request.urlopen(req, timeout=60) as resp:
@@ -67,15 +67,17 @@ def normalize(stations_raw):
         if all(v is None for v in prices.values()):
             continue
         stations.append({
-            "id": s.get("IDEESS", ""),
-            "name": s.get("Rótulo", "").strip(),
-            "address": s.get("Dirección", "").strip(),
+            "id":           s.get("IDEESS", ""),
+            "name":         s.get("Rótulo", "").strip(),
+            "address":      s.get("Dirección", "").strip(),
+            "locality":     s.get("Localidad", "").strip(),
             "municipality": s.get("Municipio", "").strip(),
-            "province": s.get("Provincia", "").strip(),
-            "lat": lat,
-            "lon": lon,
-            "schedule": s.get("Horario", "").strip(),
-            "prices": prices,
+            "province":     s.get("Provincia", "").strip(),
+            "cp":           s.get("C.P.", "").strip(),
+            "lat":          lat,
+            "lon":          lon,
+            "schedule":     s.get("Horario", "").strip(),
+            "prices":       prices,
         })
     print(f"✅ Normalized {len(stations)} stations")
     return stations
@@ -83,8 +85,9 @@ def normalize(stations_raw):
 def upload_to_base44(data, api_key):
     print("📤 Uploading to Base44 CDN...")
     json_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    
-    boundary = "----FormBoundary7MA4YWxkTrZu0gW"
+
+    boundary = "----GasRadarBoundary7MA4YWxk"
+    CRLF = b"\r\n"
     body = (
         f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="file"; filename="gasdata_normalized.json"\r\n'
@@ -97,14 +100,20 @@ def upload_to_base44(data, api_key):
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(len(body)),
         },
         method="POST"
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
-    
-    cdn_url = result.get("url") or result.get("file_url")
-    print(f"✅ Uploaded to CDN: {cdn_url}")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body_err = e.read().decode()
+        print(f"❌ Upload failed {e.code}: {body_err[:500]}")
+        raise
+
+    cdn_url = result.get("url") or result.get("file_url") or result.get("fileUrl")
+    print(f"✅ Uploaded! URL: {cdn_url}")
     return cdn_url
 
 def main():
@@ -117,9 +126,7 @@ def main():
     stations = normalize(stations_raw)
 
     now = datetime.now(timezone.utc)
-    # Format in Madrid time
-    from datetime import timedelta
-    madrid_offset = timedelta(hours=1)  # CET (adjust for DST if needed)
+    madrid_offset = timedelta(hours=1)
     madrid_time = now + madrid_offset
     updated_at = madrid_time.strftime("%d/%m/%Y %H:%M")
 
