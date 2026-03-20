@@ -2,7 +2,7 @@ name: Refresh GasRadar Data
 
 on:
   schedule:
-    - cron: '0 6,18 * * *'   # 7:00 and 19:00 Madrid time
+    - cron: '0 3,12,18 * * *'   # 7:00 and 19:00 Madrid time
   workflow_dispatch:
 
 jobs:
